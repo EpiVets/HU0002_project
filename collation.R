@@ -1056,7 +1056,7 @@ row <- ad_pre %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Pre AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
 
 ad_pre_w <- rbind(ad_pre_w, row) %>% 
   mutate(
@@ -1103,7 +1103,7 @@ row <- ad_mid %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Mid AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
 
 ad_mid_w <- rbind(ad_mid_w, row) %>% 
   mutate(
@@ -1150,7 +1150,7 @@ row <- ad_fin %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Final AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
 
 ad_fin_w <- rbind(ad_fin_w, row) %>% 
   mutate(
@@ -1204,7 +1204,7 @@ row <- ad_pre %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Pre AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
 
 ad_pre_w <- rbind(ad_pre_w, row)  %>% 
   mutate(
@@ -1252,7 +1252,7 @@ row <- ad_mid %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Mid AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
 
 ad_mid_w <- rbind(ad_mid_w, row) %>% 
   mutate(
@@ -1300,7 +1300,7 @@ row <- ad_fin %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Final AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
 
 ad_fin_w <- rbind(ad_fin_w, row) %>% 
   mutate(
@@ -1352,7 +1352,7 @@ row <- ad_pre %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Pre AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
 
 ad_pre_w <- rbind(ad_pre_w, row) %>% 
   mutate(
@@ -1400,7 +1400,7 @@ row <- ad_mid %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Mid AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
 
 ad_mid_w <- rbind(ad_mid_w, row) %>% 
   mutate(
@@ -1448,7 +1448,7 @@ row <- ad_fin %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Final AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
 
 ad_fin_w <- rbind(ad_fin_w, row) %>% 
   mutate(
@@ -1500,7 +1500,7 @@ row <- ad_pre %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Pre AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
 
 ad_pre_w <- rbind(ad_pre_w, row) %>% 
   mutate(
@@ -1548,7 +1548,7 @@ row <- ad_mid %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Mid AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
 
 ad_mid_w <- rbind(ad_mid_w, row) %>% 
   mutate(
@@ -1596,7 +1596,7 @@ row <- ad_fin %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Final AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
 
 ad_fin_w <- rbind(ad_fin_w, row) %>% 
   mutate(
@@ -1648,7 +1648,7 @@ row <- ad_pre %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Pre AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
 
 ad_pre_w <- rbind(ad_pre_w, row) %>% 
   mutate(
@@ -1696,7 +1696,7 @@ row <- ad_mid %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Mid AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
 
 ad_mid_w <- rbind(ad_mid_w, row) %>% 
   mutate(
@@ -1744,7 +1744,7 @@ row <- ad_fin %>%
   ungroup() %>%
   mutate(`Year level` = "Overall") %>%
   relocate(`Year level`) %>%
-  mutate(Overall = median(DATA$`Final AB score`, na.rm = TRUE))
+  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
 
 ad_fin_w <- rbind(ad_fin_w, row) %>% 
   mutate(
@@ -1813,14 +1813,14 @@ notes <- data.frame("NOTES" = c("Gender is expressed as F (female), M (male) and
 addWorksheet(wb, sheetName = "Notes")
 writeData(wb, sheet = "Notes", x = notes, startRow = 1, startCol = 1)
 
-# Define style
+# Define style and apply to all sheets
 style <- createStyle(fontName = "Calibri", fontSize = 10)
 
-# Apply to all sheets
 sheets <- names(wb)
+
 getRows <- function(wb, sheet) {
   sheet_data <- read.xlsx(wb, sheet = sheet)
-  return(max(which(rowSums(is.na(sheet_data)) != ncol(sheet_data))))
+  return(max(which(rowSums(!is.na(sheet_data)) > 0)))
 }
 
 getCols <- function(wb, sheet) {
@@ -1830,8 +1830,8 @@ getCols <- function(wb, sheet) {
 
 for (sheet in sheets) {
   # Get the number of rows and columns used in the sheet
-  usedRows <- getRows(wb, sheet) + 1
-  usedCols <- getCols(wb, sheet) + 1
+  usedRows <- getRows(wb, sheet) + 10
+  usedCols <- getCols(wb, sheet)
   
   addStyle(wb, sheet = sheet, style = style, rows = 1:usedRows, cols = 1:usedCols, gridExpand = TRUE)
   setColWidths(wb, sheet = sheet, cols = 1:usedCols, widths = "auto")
