@@ -219,7 +219,7 @@ for (file in files2) {
   region <- case_when(grepl("Canterbury", file_path_vector) ~ "Canterbury",
                       grepl("Hawkes", file_path_vector) ~ "Hawkes Bay",
                       grepl("Manawatu", file_path_vector) ~ "Manawatu/Rangitikei/Whanganui",
-                      grepl("Nelson", file_path_vector) ~ "Nelson/Marlborough/West_Coast")
+                      grepl("Nelson", file_path_vector) ~ "Nelson/Marlborough/West Coast")
   
   # Extract teacher from the "File Path" sheet
   teacher <- sub("^(.*/)([^/]*/[^/]+)$", "\\2", file_path_vector)
@@ -429,7 +429,11 @@ combined_data <- combined_data %>%
 
 # Tidy up rogue variables
 combined_data <- combined_data %>%
-  mutate(student_details_Gender = ifelse(grepl("Fem|fem", student_details_Gender), "F", student_details_Gender))
+  mutate(student_details_Gender = ifelse(grepl("Fem|fem", student_details_Gender), "F", student_details_Gender)) %>%
+  # Remove characters including and after the "/" in columns containing "Overall_Score_/50"
+  mutate_at(vars(contains("Overall_Score_/50")), ~str_remove(., "/.*")) %>%
+  # Convert same columns to numeric
+  mutate_at(vars(contains("Overall_Score_/50")), as.numeric)
 
 table(combined_data$student_details_Year_level)
 ###########################################################################################################################################
@@ -530,7 +534,7 @@ ethn_all <- df_combined %>%
   dplyr::relocate(Region)
 
 ###########################################################################################################################################
-# Now repeat for Canterbury, Hawkes Bay, Manawatu/Rangitikei/Whanganui, Nelson/Marlborough/West_Coast
+# Now repeat for Canterbury, Hawkes Bay, Manawatu/Rangitikei/Whanganui, Nelson/Marlborough/West Coast
 
 #1. Canterbury
 ethnicity <- DATA %>% 
@@ -727,7 +731,7 @@ ethn_man <- df_combined %>%
 #4. Nelson
 ethnicity <- DATA %>% 
   dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`) %>%
-  filter(Region=="Nelson/Marlborough/West_Coast") %>%
+  filter(Region=="Nelson/Marlborough/West Coast") %>%
   dplyr::select(-Region) %>%
   dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
   mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
@@ -785,7 +789,7 @@ colnames(df_combined) <- c("Māori F", "Māori M", "Māori U", "Pasifika F", "Pa
 # Set rownames as first column
 ethn_nel <- df_combined %>%
   rownames_to_column(var = "Year level")  %>% 
-  mutate(Region = "Nelson/Marlborough/West_Coasti") %>%
+  mutate(Region = "Nelson/Marlborough/West Coasti") %>%
   dplyr::relocate(Region)
 
 ################################################################################
@@ -895,10 +899,10 @@ ld_man <- bind_rows(ld, summary_row) %>%
   relocate(Region)
 
 
-#4. Nelson/Marlborough/West_Coast
+#4. Nelson/Marlborough/West Coast
 ld <- DATA %>%
   dplyr::select(Region, `Year level`, `Neurodiversity diagnosis`, `Neurodiversity suspicion`) %>%
-  filter(Region=="Nelson/Marlborough/West_Coast") %>%
+  filter(Region=="Nelson/Marlborough/West Coast") %>%
   dplyr::select(-Region) %>%
   mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
   mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
@@ -914,7 +918,7 @@ summary_row <- ld %>%
             `No. learners presenting learning challenges` = `Neurodiversity diagnosis` + `Neurodiversity suspicion`)
 
 ld_nel <- bind_rows(ld, summary_row) %>%
-  mutate(Region = "Nelson/Marlborough/West_Coast") %>%
+  mutate(Region = "Nelson/Marlborough/West Coast") %>%
   relocate(Region)
 
 ##################################
@@ -994,7 +998,7 @@ att_man <- DATA %>%
 
 att_nel <- DATA %>%
   dplyr::select(Region, `Year level`, `Total available`, `Total attended`) %>%
-  filter(Region=="Nelson/Marlborough/West_Coast") %>%
+  filter(Region=="Nelson/Marlborough/West Coast") %>%
   dplyr::select(-Region) %>%
   mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
   mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
@@ -1004,7 +1008,7 @@ att_nel <- DATA %>%
   mutate(`Intervention Session Attendance` = ifelse(is.nan(`Intervention Session Attendance`), "No data", `Intervention Session Attendance`)) %>%
   mutate(`Intervention Session Attendance` = ifelse(`Intervention Session Attendance` != "No data", paste0(`Intervention Session Attendance`, "%"),
                                                     `Intervention Session Attendance`)) %>%
-  mutate(Region = "Nelson/Marlborough/West_Coast") %>%
+  mutate(Region = "Nelson/Marlborough/West Coast") %>%
   relocate(Region)
 
 ##################################
@@ -1064,7 +1068,7 @@ ad_pre_w <- rbind(ad_pre_w, row) %>%
     Region = "All regions") %>%
   relocate(Region)
 
-colnames(ad_pre_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 
 ad_pre_w_all <- ad_pre_w
@@ -1111,7 +1115,7 @@ ad_mid_w <- rbind(ad_mid_w, row) %>%
     Region = "All regions") %>%
   relocate(Region)
 
-colnames(ad_mid_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_mid_w) <- c( "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 
 ad_mid_w_all <- ad_mid_w
@@ -1158,7 +1162,7 @@ ad_fin_w <- rbind(ad_fin_w, row) %>%
     Region = "All regions") %>%
   relocate(Region)
 
-colnames(ad_fin_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 
 ad_fin_w_all <- ad_fin_w
@@ -1212,7 +1216,7 @@ ad_pre_w <- rbind(ad_pre_w, row)  %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_pre_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_pre_w_can <- ad_pre_w
 
@@ -1260,7 +1264,7 @@ ad_mid_w <- rbind(ad_mid_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_mid_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_mid_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_mid_w_can <- ad_mid_w
 
@@ -1308,7 +1312,7 @@ ad_fin_w <- rbind(ad_fin_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_fin_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_fin_w_can <- ad_fin_w
 
@@ -1360,7 +1364,7 @@ ad_pre_w <- rbind(ad_pre_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_pre_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_pre_w_HB <- ad_pre_w
 
@@ -1408,7 +1412,7 @@ ad_mid_w <- rbind(ad_mid_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_mid_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_mid_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_mid_w_HB <- ad_mid_w
 
@@ -1456,7 +1460,7 @@ ad_fin_w <- rbind(ad_fin_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_fin_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_fin_w_HB <- ad_fin_w
 
@@ -1508,7 +1512,7 @@ ad_pre_w <- rbind(ad_pre_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_pre_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_pre_w_man <- ad_pre_w
 
@@ -1556,7 +1560,7 @@ ad_mid_w <- rbind(ad_mid_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_mid_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_mid_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_mid_w_man <- ad_mid_w
 
@@ -1604,7 +1608,7 @@ ad_fin_w <- rbind(ad_fin_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_fin_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_fin_w_man <- ad_fin_w
 
@@ -1656,7 +1660,7 @@ ad_pre_w <- rbind(ad_pre_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_pre_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_pre_w_nel <- ad_pre_w
 
@@ -1704,7 +1708,7 @@ ad_mid_w <- rbind(ad_mid_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_mid_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_mid_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_mid_w_nel <- ad_mid_w
 
@@ -1752,7 +1756,7 @@ ad_fin_w <- rbind(ad_fin_w, row) %>%
     Region = region) %>%
   relocate(Region)
 
-colnames(ad_fin_w) <- c("Assessment", "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
+colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
                         "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
 ad_fin_w_nel <- ad_fin_w
 
