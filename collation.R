@@ -39,20 +39,13 @@ library(writexl)
 mixedrank <- function(x) order(gtools::mixedorder(x))
 
 
-theme <- theme_bw()+
-  theme(legend.position = "bottom") +
-  theme(axis.title.x = element_text(face="bold", colour="black", size=10),
-        axis.text.y  = element_text(size=10),
-        axis.text.x  = element_text(size=10),
-        axis.title.y = element_text(face="bold", colour="black", size=10),
-        panel.grid.minor=element_blank(),
-        panel.grid.major=element_blank())
+#################################################################################################
+#################################################################################################
 
-#################################################################################################
-#################################################################################################
+# This works in two stages: 1) extract data from the LM Google Drive account and save as .xlsx files locally, 2) process the .xlsx files to make the report.
+
 
 # EXTRACT DATA FROM THE LM GOOGLE DRIVE ACCOUNT
-
 
 # Authenticate with Google
 drive_auth()
@@ -61,11 +54,13 @@ drive_auth()
 files <- drive_ls(path = "Learning Matters data for extraction/Master Spreadsheet ALL", recursive = T)
 
 # Filter the list to include only .xlsx files that have more than one sheet
-xlsx_files <- files[grepl(".xlsx", files$name), ]
+xlsx_files <- files[grepl(".xlsx", files$name), ] #%>%
+  #mutate(problem = ifelse(id=="1sjKseR0me_e8aThfQWm7SUaieNT7mUdt", 1, 0))
+  #filter(id == "1sjKseR0me_e8aThfQWm7SUaieNT7mUdt")
 
 
 # Create a local directory to store downloaded files
-local_dir <- "downloaded_xlsx_files2"
+local_dir <- "downloaded_xlsx_files"
 dir.create(local_dir, showWarnings = FALSE)
 
 # Build a dictionary of parent-child relationships
@@ -93,12 +88,63 @@ get_full_path <- function(file) {
   return(full_path)
 }
 
+# Function to anonymise student names
+# Function to replace letters with their numeral equivalents
+anonymise_name <- function(name) {
+  alphabet <- c(letters, LETTERS)
+  numerals <- c(1:26, 1:26)
+  
+  anonymised_name <- sapply(strsplit(name, NULL)[[1]], function(char) {
+    if (char %in% alphabet) {
+      numerals[which(alphabet == char)]
+    } else {
+      char # Leave non-letter characters unchanged
+    }
+  })
+  
+  return(paste0(anonymised_name, collapse = ""))
+}
+
+# Function to anonymize specific rows and columns in the sheet
+anonymise_sheet <- function(wb, sheet, cols, rows) {
+  data <- read.xlsx(wb, sheet = sheet)
+  
+  # Ensure rows and cols are within the bounds of the data frame
+  for (col in cols) {
+    # Check if column exists in the data frame
+    if (col <= ncol(data)) {
+      for (row in rows) {
+        # Check if the row exists in the data frame
+        if (row <= nrow(data)) {
+          # Check if the cell is not NA and is a character string
+          if (!is.na(data[row, col])) {
+            if (nzchar(as.character(data[row, col]))) {
+              data[row, col] <- anonymise_name(data[row, col])
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  # Write back the modified data while preserving formatting
+  writeData(wb, sheet = sheet, x = data, colNames = TRUE, rowNames = FALSE)
+}
+
+# List of sheets to keep (I will drop irrelevant sheets in case the contain information that identifies students) (not used because removing sheets upsets formatting!)
+sheets_to_keep <- c("Baseline Assessment ORF", "Tier 2 Student Details", "Common Assessment (AB)", "Student Session Attendance")
+
+#############################################################
+
 # Function to process each .xlsx file
 process_xlsx_file <- function(file) {
   # Extract file information
   file_id <- file$id
   file_name <- file$name
   file_path <- get_full_path(file)
+  
+  # Print the file information
+  message(paste("Processing file", file_name, "in folder", file_path))
   
   # Determine where this file is in the list (i.e., its row number) so I can give it a unique identifier (many have the same name)
   file_index <- which(xlsx_files$id == file_id)
@@ -107,38 +153,150 @@ process_xlsx_file <- function(file) {
   local_path <- file.path(local_dir, file_name)
   drive_download(as_id(file_id), path = local_path, overwrite = TRUE)
   
+  
   # Load the .xlsx file
   wb <- loadWorkbook(local_path)
   
-  # Check the number of sheets
-  #sheet_count <- length(getSheetNames(wb))
-  #prefix <- ifelse(length(getSheetNames(wb))<2, "Irrelevant", "Relevant")
+  
+  # Use presence of "Baseline Assessment ORF" sheet to determine relevance
   prefix <- ifelse("Baseline Assessment ORF" %in% excel_sheets(path = local_path), "Relevant", "Irrelevant")
   
-  # Option 1: Rename the file to include the name of its folder
-  #new_file_name <- paste0(gsub("/", "_", file_path), "_", file_name)
-  #new_local_path <- file.path(local_dir, new_file_name)
-  #saveWorkbook(wb = wb, file = new_file_name, overwrite = TRUE)
   
-  # Option 2: Add a new sheet with the folder path
+  # Identify sheets to clear the contents of in case they contain names (those not in sheets_to_keep). I cannot remove those sheets as it upsets formatting.
+  # Get all sheets in the workbook
+  all_sheets <- excel_sheets(path = local_path)
+  sheets_to_anonymise <- setdiff(all_sheets, sheets_to_keep)
+  
+  # Loop through the sheets to anonymise
+  # for (sheet in sheets_to_anonymise) {
+  #   if (sheet %in% names(wb)) {
+  #     # Read data from the sheet
+  #     data <- tryCatch({
+  #       read.xlsx(wb, sheet = sheet)
+  #     }, error = function(e) {
+  #       message(paste("Error reading sheet:", sheet, "-", e$message))
+  #       return(NULL)
+  #     })
+  #     
+  #     # Check if data is NULL or empty
+  #     if (!is.null(data) && nrow(data) > 0) {
+  #       # Replace all cells with NA
+  #       data[,] <- NA
+  #       
+  #       # Write back the modified data while preserving formatting
+  #       writeData(wb, sheet = sheet, x = data, colNames = TRUE, rowNames = FALSE)
+  #     } else {
+  #       message(paste("No data found in sheet:", sheet))
+  #     }
+  #   }
+  # }
+  
+  for (sheet in sheets_to_anonymise) {
+    if (sheet %in% names(wb)) {
+      # Read data from the sheet
+      data <- tryCatch({
+        read.xlsx(wb, sheet = sheet)
+      }, error = function(e) {
+        message(paste("Error reading sheet:", sheet, "-", e$message))
+        return(NULL)
+      })
+      
+      # Check if data is NULL or empty
+      if (!is.null(data) && nrow(data) > 0) {
+        # Get the dimensions of the data
+        rows <- nrow(data)
+        cols <- ncol(data)
+        
+        # Create a new empty matrix with the same dimensions
+        empty_data <- matrix(NA, nrow = rows, ncol = cols)
+        
+        # Write the empty data back to the sheet
+        writeData(wb, sheet = sheet, x = empty_data, colNames = TRUE, rowNames = FALSE)
+      } else {
+        message(paste("No data found in sheet:", sheet))
+      }
+    }
+  }
+
+  # Repeat to tidy up
+  for (sheet in sheets_to_anonymise) {
+    if (sheet %in% names(wb)) {
+      # Read data from the sheet
+      data <- tryCatch({
+        read.xlsx(wb, sheet = sheet)
+      }, error = function(e) {
+        message(paste("Error reading sheet:", sheet, "-", e$message))
+        return(NULL)
+      })
+      
+      # Check if data is NULL or empty
+      if (!is.null(data) && nrow(data) > 0) {
+        # Get the dimensions of the data
+        rows <- nrow(data)
+        cols <- ncol(data)
+        
+        # Create a new empty matrix with the same dimensions
+        empty_data <- matrix(NA, nrow = rows, ncol = cols)
+        
+        # Write the empty data back to the sheet
+        writeData(wb, sheet = sheet, x = empty_data, colNames = TRUE, rowNames = FALSE)
+      } else {
+        message(paste("No data found in sheet:", sheet))
+      }
+    }
+  }
+  
+  # Anonymise students by replacing upper or lower case letters in names with the equivalent number in the alphabet. Leave non-alphabetic characters and spaces unchanged.
+  # Define the sheets and columns where student names are located
+  sheets_with_names <- c("Baseline Assessment ORF", "Tier 2 Student Details", "Common Assessment (AB)", "Student Session Attendance")
+
+  # Define the mapping for sheets, columns, and rows
+  sheets_info <- list(
+    "Baseline Assessment ORF" = list(cols = 1, rows = 2:1000),  
+    "Tier 2 Student Details" = list(cols = 2, rows = 2:1000),
+    "Common Assessment (AB)" = list(cols = 2, rows = 2:1000),
+    "Student Session Attendance" = list(cols =  5:10, rows = 2)
+  )
+  
+  # Loop through the sheets_info to anonymise names
+  for (sheet in names(sheets_info)) {
+    if (sheet %in% names(wb)) {
+      cols <- sheets_info[[sheet]]$cols
+      rows <- sheets_info[[sheet]]$rows
+      anonymise_sheet(wb, sheet, cols, rows)
+    }
+  }
+  
+  
+
+
+  # Add a new sheet with the folder path so it can be tracked
   addWorksheet(wb, "File Path")
   writeData(wb, sheet = "File Path", x = file_path)
+  
+  # Save the workbook
   saveWorkbook(wb, local_path, overwrite = TRUE)
   
   # Return the path of the modified file
   #return(new_local_path)
   
   # Rename the file to include a unique identifier
-  unique_file_name <- paste0(prefix, "_", file_index, "_", file_name)
+  unique_file_name  <- paste0(prefix, "_", file_index, "_", file_name)
   unique_local_path <- file.path(local_dir, unique_file_name)
   file.rename(local_path, unique_local_path)
+  
   
   # Return the path of the modified file
   return(unique_local_path)  
 }
 
+
+
+
+
 # Use a reduced dataset for practice
-#xlsx_files <- xlsx_files[1:12, ]
+#xlsx_files <- xlsx_files[1:5, ]
+xlsx_files2 <- xlsx_files[1, ]
 
 # Process each .xlsx file and store the paths of modified files
 modified_files <- sapply(1:nrow(xlsx_files), function(i) process_xlsx_file(xlsx_files[i, ]))
@@ -162,6 +320,8 @@ data_list <- list()
 
 # Create a vector to hold name of spreadsheet being worked on in case of a bug
 spreadsheet_name <- c()
+
+
 
 ###################################################################################################################################################
 # Loop through each file
@@ -190,6 +350,7 @@ for (file in files2) {
   # Read the "Tier 2 Student Details" sheet
   tier2_details <- read_excel(file, sheet = "Tier 2 Student Details", col_types = c("text")) %>%
     clean_names()
+
   
   # Tidy up colnames
   new_colnames <- replace_x_colnames(colnames(tier2_details))
@@ -214,6 +375,16 @@ for (file in files2) {
   
   print(noquote(paste0("File path = ", "'", file_path_vector, "'")))
   
+  # Check for columns that have been duplicated and remove said columns
+  # tier2_details <- tier2_details %>%
+  #   select(-contains("x"))
+  
+  # Remove duplicate columns if table contains data, otherwise leave it as is
+  if (nrow(tier2_details) > 0) {
+    tier2_details <- tier2_details[, !duplicated(names(tier2_details))]
+  }
+  
+  
   ##############################################################################################
   # Extract the "Region" from the "File Path" sheet.
   region <- case_when(grepl("Canterbury", file_path_vector) ~ "Canterbury",
@@ -229,28 +400,31 @@ for (file in files2) {
   
   ##############################################################################################
   # Extract "neurodiverse_diagnosis"
+  
   neurodiverse_diagnosis <- tier2_details %>%
-    dplyr::select(student_details_Student_Name, starts_with("neuro_diverse_diagnosis"), - neuro_diverse_diagnosis_Ethnicity) %>%
+    dplyr::select(student_details_Student_Name, starts_with("neuro_diverse_diagnosis"), -neuro_diverse_diagnosis_Ethnicity) %>%
     # Rename columns with only the characters after the last "_"
     rename_with(~str_extract(., "(?<=_)[^_]+$"), .cols = everything()) %>%
     pivot_longer(cols = !Name, names_to = "Diagnosis", values_to = "value") %>%
-    filter(!is.na(value)) %>%
+    filter(!is.na(value) & !tolower(value) %in% c("no", "none", "n/a", "n", "x")) %>%  # Exclude "No", "no", "None", "none", "N/A", "N", "x"
     group_by(Name) %>%
     mutate(neurodiverse_diagnosis = paste(Diagnosis, collapse = ", ")) %>%
     dplyr::select(Name, neurodiverse_diagnosis) %>%
+    slice_head(n=1) %>%
     ungroup()
   
-  # Extract "neurodiverse suspicion"
   neurodiverse_suspicion <- tier2_details %>%
     dplyr::select(student_details_Student_Name, starts_with("neuro_diverse_suspicion")) %>%
-    # Rename columns with only the characters after the last "_"
     rename_with(~str_extract(., "(?<=_)[^_]+$"), .cols = everything()) %>%
-    pivot_longer(cols = !Name, names_to = "Suspicion", values_to = "value") %>%
-    filter(!is.na(value)) %>%
+    pivot_longer(cols = -Name, names_to = "Suspicion", values_to = "value") %>%
+    filter(!is.na(value) & !tolower(value) %in% c("no", "none", "n/a", "n", "x")) %>%  # Exclude "No", "no", "None", "none", "N/A", "N", "x"
     group_by(Name) %>%
     mutate(neurodiverse_suspicion = paste(Suspicion, collapse = ", ")) %>%
     dplyr::select(Name, neurodiverse_suspicion) %>%
+    slice_head(n=1) %>%
     ungroup()
+  
+  
   
   # Add "Region" and "Teacher" columns to the "Tier 2 Student Details" data frame and add neurodiverse diagnosis and suspicion
   tier2_details <- tier2_details %>% 
@@ -306,7 +480,7 @@ for (file in files2) {
     dplyr::select(-no_of_sessions_wk)
   
   # Check if there are any attendance data
-  attendance_data <- ssa %>%
+  attendance_data <- ssa[-1,] %>%
     pivot_longer(cols = starts_with("student_name"), names_to = "Name", values_to = "n_sessions")
   
   attendance_data <- ifelse(sum(!is.na(attendance_data$n_sessions)) > 0, "Yes", "No")
@@ -338,19 +512,30 @@ for (file in files2) {
     ssa <- ssa[-1, ]
     
       # Tidy up sessions (some entered as numbers, others as days)
-      convert_sessions <- function(sessions) {
-        if (is.na(sessions)) {
-          return(NA_integer_)
-        } else if (str_detect(sessions, "^\\d+$")) {
-          # If it is a number, convert to integer
-          return(as.integer(sessions))
-        } else {
-          # If it is text, count the number of items and convert to integer
-          days <- str_split(sessions, ",\\s*")[[1]]
-          return(length(days))
-        }
+    convert_sessions <- function(sessions) {
+      if (is.na(sessions)) {
+        return(NA_integer_)
+      } else if (str_detect(sessions, "(?i)^o\\s*-\\s*overseas$")) {
+        # If the string is "O - overseas" (case insensitive), return 0
+        return(0)
+      } else if (str_detect(sessions, "(?i)away")) {
+        # If the string contains "Away" or "away", return 0
+        return(0)
+      } else if (str_detect(sessions, "^✔+$")) {
+        # If it contains only check marks, count them
+        return(str_count(sessions, "✔"))
+      } else if (str_detect(sessions, "\\d+")) {
+        # If it contains a number, extract and convert to numeric
+        return(as.numeric(str_extract(sessions, "\\d+")))
+      } else {
+        # If it is text, count the number of items and convert to integer
+        days <- str_split(sessions, ",\\s*")[[1]]
+        return(length(days))
       }
-
+    }
+    
+    
+    
       ssa <- ssa %>%
         mutate(sessions_taught_per_week = sapply(sessions_taught_per_week, convert_sessions))
 
@@ -361,6 +546,7 @@ for (file in files2) {
       ssa <- ssa %>%
         pivot_longer(cols = (sessions_taught_per_week_position + 1):ncol(ssa), names_to = "Name", values_to = "n_sessions") %>%
         mutate(n_sessions = sapply(n_sessions, convert_sessions)) %>%
+        #mutate(n_sessions = as.numeric(n_sessions)) %>%
         select(Name, sessions_taught_per_week, n_sessions) %>%
         group_by(Name) %>%
         dplyr::summarise(`Total available` = sum(sessions_taught_per_week, na.rm = TRUE), `Total attended` = sum(n_sessions, na.rm = TRUE))
@@ -389,7 +575,9 @@ for (file in files2) {
 
 
   # Join the student session attendance data
-  data <- left_join(data, ssa, by = c("student_details_Student_Name" = "Name"))
+  data <- left_join(data, ssa, by = c("student_details_Student_Name" = "Name")) %>%
+    # Add column capturing the source of the data
+    mutate(Source = spreadsheet_name)
 
   # Append the modified data frame to the list
   data_list <- append(data_list, list(data))
@@ -402,7 +590,8 @@ for (file in files2) {
 # Combine all data frames together by row
 length(data_list)
 combined_data <- bind_rows(data_list)
-length(unique(combined_data$Teacher)) #90 teachers.
+length(unique(combined_data$Teacher)) #86 teachers.
+
 
 # Identify rows with the same value for "Firstname" but different values for "Surname" and one of the values for "Surname" is "Surname not provided"
 combined_data <- combined_data %>%
@@ -418,7 +607,7 @@ combined_data <- combined_data %>%
   tidyr::fill(Surname, .direction = "updown") %>%
   ungroup()
 
-#View(combined_data %>% filter(student_details_National_Student_number_tier2==144075364))
+View(combined_data %>% filter(Firstname=="1051919931" & Surname=="1714523"))
 
 combined_data <- combined_data %>%
   group_by(Firstname, Surname, Teacher) %>%
@@ -427,32 +616,79 @@ combined_data <- combined_data %>%
   distinct() %>%
   ungroup()
 
-# Tidy up rogue variables
+
+# Deal with Fiona Wilder
+anonymise_name("Fiona"); anonymise_name("Wilder")
+View(combined_data[combined_data$Firstname == "6915141" & combined_data$Surname=="239124518" & !is.na(combined_data$Firstname), ])
+# 51 Fiona Wilders
+
+# Tidy up rogue variables and remove Fiona Wilder
 combined_data <- combined_data %>%
   mutate(student_details_Gender = ifelse(grepl("Fem|fem", student_details_Gender), "F", student_details_Gender)) %>%
   # Remove characters including and after the "/" in columns containing "Overall_Score_/50"
   mutate_at(vars(contains("Overall_Score_/50")), ~str_remove(., "/.*")) %>%
   # Convert same columns to numeric
-  mutate_at(vars(contains("Overall_Score_/50")), as.numeric)
+  mutate_at(vars(contains("Overall_Score_/50")), as.numeric) %>%
+  filter(!(coalesce(Firstname, "") == "6915141" & coalesce(Surname, "") == "239124518")) # Use coalesce to handle NA values!
+
 
 table(combined_data$student_details_Year_level)
+
 ###########################################################################################################################################
 ###########################################################################################################################################
 
+# IMPORT E-ASTTLE DATA AND MERGE WITH COMBINED DATA
+eas <- read_excel("Copy of e-asTTLe Data Term 2 Sep_2024.xlsx", sheet = 1) %>%
+  clean_names() %>%
+  dplyr::rename(Firstname = "firstname", Surname = "surname", east = "overall_scale_score") %>%
+  dplyr::select(Firstname, Surname, east) %>%
+  # Identify duplicate rows
+  group_by(Firstname, Surname) %>%
+  mutate(duplicate = n() > 1) %>%
+  ungroup()
+
+# Anonymise names in eas
+eas <- eas %>%
+  mutate(Firstname = sapply(Firstname, anonymise_name),
+         Surname = sapply(Surname, anonymise_name))
+
+# Remove the duplicated row for 13251 4122919-201212381185 by taking only the first iteration
+eas <- eas %>% 
+  group_by(Firstname, Surname) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  select(-duplicate)
+
+
+# Merge the e-asTTLe data with the combined data
+combined_data <- left_join(combined_data, eas, by = c("Firstname", "Surname"))
+
+###########################################################################################################################################
+###########################################################################################################################################
 
 # Create the final dataframe needed by LM
 DATA <- combined_data %>%
   dplyr::select(Firstname, Surname, Region, School, Teacher, student_details_Year_level, student_details_Gender, student_details_Ethnicity_1, student_details_Ethnicity_2,
                 neurodiverse_diagnosis, neurodiverse_suspicion, `Total available`, `Total attended`, 
                 `pre_adapted_bryant_assessment_Overall_Score_/50`, `mid_adapted_bryant_assessment_Overall_Score_/50`, 
-                `final_adapted_bryant_assessment_Overall_Score_/50`) %>%
+                `final_adapted_bryant_assessment_Overall_Score_/50`, east) %>%
   dplyr::rename(`Year level` = student_details_Year_level, `Ethnicity 1` = student_details_Ethnicity_1, `Ethnicity 2` = student_details_Ethnicity_2, 
                 Gender = student_details_Gender,
                 `Neurodiversity diagnosis` = neurodiverse_diagnosis, `Neurodiversity suspicion` = neurodiverse_suspicion,
                 `Pre AB score` = `pre_adapted_bryant_assessment_Overall_Score_/50`, `Mid AB score` = `mid_adapted_bryant_assessment_Overall_Score_/50`, 
-                `Final AB score` = `final_adapted_bryant_assessment_Overall_Score_/50`)
+                `Final AB score` = `final_adapted_bryant_assessment_Overall_Score_/50`,
+                `e-asTTle overall scaled score` = east) %>%
+  # Convert values of zero in e-asTTle to NA
+  mutate(`e-asTTle overall scaled score` = ifelse(`e-asTTle overall scaled score` == 0, NA, `e-asTTle overall scaled score`)) %>%
+  # If Gender == "M (F)", replace with "M" 
+  mutate(Gender = ifelse(Gender=="M (F)", "M", Gender))
 
-table(DATA$Gender)
+table(DATA$`e-asTTle overall scaled score`)
+
+###########################################################################################################################################
+###########################################################################################################################################
+
+# ETHNICITY SHEET
 
 # Ethnicity table - NB this only takes the first ethnicity value
 ethnicity <- DATA %>% 
@@ -466,8 +702,13 @@ ethnicity <- DATA %>%
   mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
   mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
   mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
+  # If Gender == "M (F)", replace with "M" 
+  #mutate(Gender = ifelse(Gender=="M (F)", "M", Gender)) %>%
   mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
   mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown")))
+  
+
+table(ethnicity$Gender, useNA = "always")
   
 # tbl_strata(data = ethnicity,
 #            strata = Gender,
@@ -792,24 +1033,11 @@ ethn_nel <- df_combined %>%
   mutate(Region = "Nelson/Marlborough/West Coasti") %>%
   dplyr::relocate(Region)
 
-################################################################################
-
-# Write to a workbook
-wb <- createWorkbook()
-
-# Add a worksheet to the workbook
-addWorksheet(wb, sheetName = "Ethnicity")
-
-# Write each dataframe to the worksheet with spacing
-writeData(wb, sheet = "Ethnicity", x = ethn_all, startRow = 1, startCol = 1)
-writeData(wb, sheet = "Ethnicity", x = ethn_cant, startRow = nrow(df_combined) + 4, startCol = 1)
-writeData(wb, sheet = "Ethnicity", x = ethn_HB, startRow = nrow(df_combined) + nrow(ethn_cant) + 6, startCol = 1)
-writeData(wb, sheet = "Ethnicity", x = ethn_man, startRow = nrow(df_combined) + nrow(ethn_cant) + nrow(ethn_HB) + 9, startCol = 1)
-writeData(wb, sheet = "Ethnicity", x = ethn_nel, startRow = nrow(df_combined) + nrow(ethn_cant) + nrow(ethn_HB) + nrow(ethn_man) + 12, startCol = 1)
-
 
 ################################################################################################################################################################
 ################################################################################################################################################################
+
+# LEARNING DIFFERENCES SHEET
 
 ld <- DATA %>%
   dplyr::select(`Year level`, `Neurodiversity diagnosis`, `Neurodiversity suspicion`) %>%
@@ -921,20 +1149,11 @@ ld_nel <- bind_rows(ld, summary_row) %>%
   mutate(Region = "Nelson/Marlborough/West Coast") %>%
   relocate(Region)
 
-##################################
-
-# Add a worksheet to the workbook
-addWorksheet(wb, sheetName = "Learning differences")
-
-# Write each dataframe to the worksheet with spacing
-writeData(wb, sheet = "Learning differences", x = ld_all, startRow = 1, startCol = 1)
-writeData(wb, sheet = "Learning differences", x = ld_can, startRow = nrow(ld_all) + 4, startCol = 1)
-writeData(wb, sheet = "Learning differences", x = ld_HB, startRow = nrow(ld_all) + nrow(ld_can) + 6, startCol = 1)
-writeData(wb, sheet = "Learning differences", x = ld_man, startRow = nrow(ld_all) + nrow(ld_can) + nrow(ld_HB) + 9, startCol = 1)
-writeData(wb, sheet = "Learning differences", x = ld_nel, startRow = nrow(ld_all) + nrow(ld_can) + nrow(ld_HB) + nrow(ld_man) + 12, startCol = 1)
 
 ################################################################################################################################################################
 ################################################################################################################################################################
+
+# ATTENDANCE SHEET
 
 att <- DATA %>%
   dplyr::select(`Year level`, `Total available`, `Total attended`) %>%
@@ -1011,9 +1230,273 @@ att_nel <- DATA %>%
   mutate(Region = "Nelson/Marlborough/West Coast") %>%
   relocate(Region)
 
-##################################
+################################################################################################################################################################
+################################################################################################################################################################
 
-# Add a worksheet to the workbook
+# ADPATIVE BRYANT SHEET
+
+# Create function to save repetitive code
+
+create_region_assessment_df <- function(region, assessment) {
+  
+  # Dynamic column name for assessment score
+  score_column <- paste0(assessment, " AB score")
+  
+  # Desired column names
+  desired_columns <- c(
+    "Year level", 
+    "N_Māori_F", paste0(assessment, " AB score_Māori_F"),
+    "N_Māori_M", paste0(assessment, " AB score_Māori_M"),
+    "N_Māori_Unknown", paste0(assessment, " AB score_Māori_Unknown"),
+    "N_Pasifika_F", paste0(assessment, " AB score_Pasifika_F"),
+    "N_Pasifika_M", paste0(assessment, " AB score_Pasifika_M"),
+    "N_Pasifika_Unknown", paste0(assessment, " AB score_Pasifika_Unknown"),
+    "N_NZ European_F", paste0(assessment, " AB score_NZ European_F"),
+    "N_NZ European_M", paste0(assessment, " AB score_NZ European_M"),
+    "N_NZ European_Unknown", paste0(assessment, " AB score_NZ European_Unknown"),
+    "N_Other_F", paste0(assessment, " AB score_Other_F"),
+    "N_Other_M", paste0(assessment, " AB score_Other_M"),
+    "N_Other_Unknown", paste0(assessment, " AB score_Other_Unknown"),
+    "N_Unknown_F", paste0(assessment, " AB score_Unknown_F"),
+    "N_Unknown_M", paste0(assessment, " AB score_Unknown_M"),
+    "N_Unknown_Unknown", paste0(assessment, " AB score_Unknown_Unknown"))
+  
+  # Filter and preprocess data
+  ad_data <- DATA %>%
+    dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, !!score_column) %>%
+    { if (region != "National") filter(., Region == region) else . } %>% # Region filter if not National
+    dplyr::select(-Region) %>%
+    dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
+    mutate(Ethnicity = as.factor(case_when(
+      grepl("Maori|Māori", Ethnicity) ~ "Māori",
+      grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
+      grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
+      is.na(Ethnicity) ~ "Unknown",
+      .default = "Other"
+    ))) %>%
+    mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
+    mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
+    mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
+    mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
+    mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
+    mutate(across(contains("score"), as.numeric)) %>%
+    filter(!is.na(!!as.name(score_column)))
+  
+  # Overall column
+  col <- ad_data %>%
+    group_by(`Year level`, .drop = F) %>%
+    dplyr::summarise(N = n(), Overall = median(!!as.name(score_column), na.rm = TRUE))
+  
+  # Pivot the data wider by Ethnicity and Gender
+  ad_wide <- ad_data %>%
+    group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
+    dplyr::summarise(N = n(), !!score_column := median(!!as.name(score_column), na.rm = TRUE)) %>%
+    pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(N, !!as.name(score_column))) %>%
+    ungroup() %>%
+    select(all_of(desired_columns)) %>%
+    bind_cols(col[2:3])
+  
+  # Overall row
+  row <- ad_data %>%
+    group_by(Gender, Ethnicity, .drop = F) %>%
+    dplyr::summarise(N = n(), !!score_column := median(!!as.name(score_column), na.rm = TRUE)) %>%
+    pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(N, !!as.name(score_column))) %>%
+    ungroup() %>%
+    mutate(`Year level` = "Overall") %>%
+    relocate(`Year level`) %>%
+    select(all_of(desired_columns)) %>%
+    mutate(N = sum(!is.na(ad_data %>% pull(!!score_column))), Overall = median(ad_data %>% pull(!!score_column), na.rm = TRUE))
+  
+  
+  # Combine the wide data and overall row, and add region information
+  ad_wide <- rbind(ad_wide, row) %>%
+    mutate(Region = region) %>%
+    relocate(Region)
+  
+  # Rename columns
+  colnames(ad_wide) <- c("Region", "Year level", "N Māori F", "Median Māori F", "N Māori M", "Median Māori M", "N Māori U", "Median Māori U", 
+                         "N Pasifika F", "Median Pasifika F", "N Pasifika M", "Median Pasifika M", "N Pasifika U", "Median Pasifika U", 
+                         "N NZ European F", "Median NZ European F", "N NZ European M", "Median NZ European M", "N NZ European U", "Median NZ European U", 
+                         "N Other F", "Median Other F", "N Other M", "Median Other M", "N Other U", "Median Other U",
+                         "N Unknown F", "Median Unknown F", "N Unknown M", "Median Unknown M", "N Unknown U", "Median Unknown U",
+                         "N overall", "Median overall")
+  
+
+  return(ad_wide)
+}
+
+
+#1. National
+ad_pre_w_all <- create_region_assessment_df("National", "Pre")
+ad_mid_w_all <- create_region_assessment_df("National", "Mid")
+ad_fin_w_all <- create_region_assessment_df("National", "Final")
+
+#2. Canterbury
+ad_pre_w_can <- create_region_assessment_df("Canterbury", "Pre")
+ad_mid_w_can <- create_region_assessment_df("Canterbury", "Mid")
+ad_fin_w_can <- create_region_assessment_df("Canterbury", "Final")
+
+#3. Hawkes Bay
+ad_pre_w_HB <- create_region_assessment_df("Hawkes Bay", "Pre")
+ad_mid_w_HB <- create_region_assessment_df("Hawkes Bay", "Mid")
+ad_fin_w_HB <- create_region_assessment_df("Hawkes Bay", "Final")
+
+#4. Manawatu/Rangitikei/Whanganui
+ad_pre_w_man <- create_region_assessment_df("Manawatu/Rangitikei/Whanganui", "Pre")
+ad_mid_w_man <- create_region_assessment_df("Manawatu/Rangitikei/Whanganui", "Mid")
+ad_fin_w_man <- create_region_assessment_df("Manawatu/Rangitikei/Whanganui", "Final")
+
+#5. Nelson/Marlborough/West Coast
+ad_pre_w_nel <- create_region_assessment_df("Nelson/Marlborough/West Coast", "Pre")
+ad_mid_w_nel <- create_region_assessment_df("Nelson/Marlborough/West Coast", "Mid")
+ad_fin_w_nel <- create_region_assessment_df("Nelson/Marlborough/West Coast", "Final")
+
+
+##################################################################################################################
+##################################################################################################################
+
+# ADD E-ASTTLE DATA SHEET
+
+# Function to save repetitive code
+easttle_df <- function(region) {
+  
+  # Desired column names
+  desired_columns <- c(
+    "Year level", 
+    "N_Māori_F", "e-asTTle overall scaled score_Māori_F",
+    "N_Māori_M", "e-asTTle overall scaled score_Māori_M",
+    "N_Māori_Unknown", "e-asTTle overall scaled score_Māori_Unknown",
+    "N_Pasifika_F", "e-asTTle overall scaled score_Pasifika_F",
+    "N_Pasifika_M", "e-asTTle overall scaled score_Pasifika_M",
+    "N_Pasifika_Unknown", "e-asTTle overall scaled score_Pasifika_Unknown",
+    "N_NZ European_F", "e-asTTle overall scaled score_NZ European_F",
+    "N_NZ European_M", "e-asTTle overall scaled score_NZ European_M",
+    "N_NZ European_Unknown", "e-asTTle overall scaled score_NZ European_Unknown",
+    "N_Other_F", "e-asTTle overall scaled score_Other_F",
+    "N_Other_M", "e-asTTle overall scaled score_Other_M",
+    "N_Other_Unknown", "e-asTTle overall scaled score_Other_Unknown",
+    "N_Unknown_F", "e-asTTle overall scaled score_Unknown_F",
+    "N_Unknown_M", "e-asTTle overall scaled score_Unknown_M",
+    "N_Unknown_Unknown", "e-asTTle overall scaled score_Unknown_Unknown")
+  
+  easttle <- DATA %>% 
+    dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `e-asTTle overall scaled score`) %>%
+    { if (region != "National") filter(., Region == region) else . } %>% # Region filter if not National
+    dplyr::select(-Region) %>%
+    dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
+    mutate(`e-asTTle overall scaled score` = as.numeric(`e-asTTle overall scaled score`)) %>%
+    mutate(Ethnicity = as.factor(case_when(
+      grepl("Maori|Māori", Ethnicity) ~ "Māori",
+      grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
+      grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
+      is.na(Ethnicity) ~ "Unknown",
+      .default = "Other"
+    ))) %>%
+    mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
+    mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
+    mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
+    mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
+    mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
+    mutate(across(contains("score"), as.numeric)) %>%
+    filter(!is.na(`e-asTTle overall scaled score`))
+  
+  # Column aggregation
+  col <- easttle %>%
+    group_by(`Year level`, .drop = F) %>%
+    dplyr::summarise(N = n(), Overall = median(`e-asTTle overall scaled score`, na.rm = TRUE))
+  
+  # Pivoting and reshaping
+  easttle_w <- easttle %>%
+    group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
+    dplyr::summarise(N = n(), `e-asTTle overall scaled score` = median(`e-asTTle overall scaled score`, na.rm = TRUE)) %>%
+    pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(N, `e-asTTle overall scaled score`)) %>%
+    ungroup() %>%
+    select(all_of(desired_columns)) %>%
+    bind_cols(col[2:3])
+  
+  # Adding "Overall" row
+  row <- easttle %>%
+    group_by(Gender, Ethnicity, .drop = F) %>%
+    dplyr::summarise(N = n(), `e-asTTle overall scaled score` = median(`e-asTTle overall scaled score`, na.rm = TRUE)) %>%
+    pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(N, `e-asTTle overall scaled score`)) %>%
+    ungroup() %>%
+    mutate(`Year level` = "Overall") %>%
+    relocate(`Year level`) %>%
+    select(all_of(desired_columns)) %>%
+    mutate(N = sum(!is.na(easttle$`e-asTTle overall scaled score`)), 
+           Overall = median(as.numeric(easttle$`e-asTTle overall scaled score`), na.rm = TRUE))
+  
+  # Combine everything and rename columns
+  easttle_w <- rbind(easttle_w, row) %>% 
+    mutate(Region = region) %>%
+    relocate(Region)
+  
+  colnames(easttle_w) <- c(
+    "Region", "Year level", "N Māori F", "Median Māori F", "N Māori M", "Median Māori M", "N Māori U", "Median Māori U", 
+    "N Pasifika F", "Median Pasifika F", "N Pasifika M", "Median Pasifika M", "N Pasifika U", "Median Pasifika U", 
+    "N NZ European F", "Median NZ European F", "N NZ European M", "Median NZ European M", "N NZ European U", "Median NZ European U", 
+    "N Other F", "Median Other F", "N Other M", "Median Other M", "N Other U", "Median Other U", 
+    "N Unknown F", "Median Unknown F", "N Unknown M", "Median Unknown M", "N Unknown U", "Median Unknown U", "N overall", "Median overall")
+  
+  return(easttle_w)
+}
+
+
+# Make the dataframes
+easttle_all <- easttle_df("National")
+easttle_can <- easttle_df("Canterbury")
+easttle_HB  <- easttle_df("Hawkes Bay")
+easttle_man <- easttle_df("Manawatu/Rangitikei/Whanganui")
+easttle_nel <- easttle_df("Nelson/Marlborough/West Coast")
+
+
+##################################################################################################################
+##################################################################################################################
+
+# IDENTIFY TEACHERS WHOSE NEURODIVERSITY FIELDS ARE ALL EMPTY
+
+# Use combined_data, group by Teacher, and make a list of teachers who have all NA for columns starting with "Neurodiversity"
+empty_neurodiversity <- DATA %>%
+  group_by(Teacher) %>%
+  filter(all(is.na(across(starts_with("Neurodiversity"))))) %>%
+  arrange(Teacher) %>%
+  pull(Teacher) %>%
+  unique() 
+
+# Print as a vector I can paste into Excel
+cat(paste(empty_neurodiversity, collapse = ", "))
+
+##################################################################################################################
+##################################################################################################################
+
+
+# CREATE WORKBOOK
+
+wb <- createWorkbook()
+
+# Add ethnicity worksheet to the workbook
+addWorksheet(wb, sheetName = "Ethnicity")
+
+# Write each dataframe to the worksheet with spacing
+writeData(wb, sheet = "Ethnicity", x = ethn_all, startRow = 1, startCol = 1)
+writeData(wb, sheet = "Ethnicity", x = ethn_cant, startRow = nrow(df_combined) + 4, startCol = 1)
+writeData(wb, sheet = "Ethnicity", x = ethn_HB, startRow = nrow(df_combined) + nrow(ethn_cant) + 6, startCol = 1)
+writeData(wb, sheet = "Ethnicity", x = ethn_man, startRow = nrow(df_combined) + nrow(ethn_cant) + nrow(ethn_HB) + 9, startCol = 1)
+writeData(wb, sheet = "Ethnicity", x = ethn_nel, startRow = nrow(df_combined) + nrow(ethn_cant) + nrow(ethn_HB) + nrow(ethn_man) + 12, startCol = 1)
+
+
+# Add learning differences worksheet to the workbook
+addWorksheet(wb, sheetName = "Learning differences")
+
+# Write each dataframe to the worksheet with spacing
+writeData(wb, sheet = "Learning differences", x = ld_all, startRow = 1, startCol = 1)
+writeData(wb, sheet = "Learning differences", x = ld_can, startRow = nrow(ld_all) + 4, startCol = 1)
+writeData(wb, sheet = "Learning differences", x = ld_HB, startRow = nrow(ld_all) + nrow(ld_can) + 6, startCol = 1)
+writeData(wb, sheet = "Learning differences", x = ld_man, startRow = nrow(ld_all) + nrow(ld_can) + nrow(ld_HB) + 9, startCol = 1)
+writeData(wb, sheet = "Learning differences", x = ld_nel, startRow = nrow(ld_all) + nrow(ld_can) + nrow(ld_HB) + nrow(ld_man) + 12, startCol = 1)
+
+
+# Add attendance worksheet to the workbook
 addWorksheet(wb, sheetName = "Attendance")
 
 # Write each dataframe to the worksheet with spacing
@@ -1023,746 +1506,8 @@ writeData(wb, sheet = "Attendance", x = att_HB, startRow = nrow(att) + nrow(att_
 writeData(wb, sheet = "Attendance", x = att_man, startRow = nrow(att) + nrow(att_can) + nrow(att_HB) + 9, startCol = 1)
 writeData(wb, sheet = "Attendance", x = att_nel, startRow = nrow(att) + nrow(att_can) + nrow(att_HB) + nrow(att_man) + 12, startCol = 1)
 
-################################################################################################################################################################
-################################################################################################################################################################
 
-ad_pre <- DATA %>% 
-  dplyr::select(Gender, `Year level`, `Ethnicity 1`, `Pre AB score`) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_pre %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- ad_pre %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_pre %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- rbind(ad_pre_w, row) %>% 
-  mutate(
-    #Assessment = "Pre assessment", 
-    Region = "All regions") %>%
-  relocate(Region)
-
-colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-
-ad_pre_w_all <- ad_pre_w
-
-ad_mid <- DATA %>% 
-  dplyr::select(Gender, `Year level`, `Ethnicity 1`, `Mid AB score`) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_mid %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- ad_mid %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_mid %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- rbind(ad_mid_w, row) %>% 
-  mutate(
-    #Assessment = "Mid assessment", 
-    Region = "All regions") %>%
-  relocate(Region)
-
-colnames(ad_mid_w) <- c( "Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-
-ad_mid_w_all <- ad_mid_w
-
-ad_fin <- DATA %>% 
-  dplyr::select(Gender, `Year level`, `Ethnicity 1`, `Final AB score`) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_fin %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- ad_fin %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_fin %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- rbind(ad_fin_w, row) %>% 
-  mutate(
-    #Assessment = "Final assessment", 
-    Region = "All regions") %>%
-  relocate(Region)
-
-colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-
-ad_fin_w_all <- ad_fin_w
-
-#########################################################
-# Repeat for each region
-#1. Canterbury
-region <- "Canterbury"
-
-ad_pre <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Pre AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_pre %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- ad_pre %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_pre %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- rbind(ad_pre_w, row)  %>% 
-  mutate(
-    #Assessment = "Pre assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_pre_w_can <- ad_pre_w
-
-ad_mid <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Mid AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_mid %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- ad_mid %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_mid %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- rbind(ad_mid_w, row) %>% 
-  mutate(
-    #Assessment = "Mid assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_mid_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_mid_w_can <- ad_mid_w
-
-ad_fin <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Final AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_fin %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- ad_fin %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_fin %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- rbind(ad_fin_w, row) %>% 
-  mutate(
-    #Assessment = "Final assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_fin_w_can <- ad_fin_w
-
-#########################################################
-#2. Hawkes Bay
-region <- "Hawkes Bay"
-
-ad_pre <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Pre AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_pre %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- ad_pre %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_pre %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- rbind(ad_pre_w, row) %>% 
-  mutate(
-    #Assessment = "Pre assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_pre_w_HB <- ad_pre_w
-
-ad_mid <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Mid AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_mid %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- ad_mid %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_mid %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- rbind(ad_mid_w, row) %>% 
-  mutate(
-    #Assessment = "Mid assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_mid_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_mid_w_HB <- ad_mid_w
-
-ad_fin <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Final AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_fin %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- ad_fin %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_fin %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- rbind(ad_fin_w, row) %>% 
-  mutate(
-    #Assessment = "Final assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_fin_w_HB <- ad_fin_w
-
-#########################################################
-#3. Manawatu/Rangitikei/Whanganui
-region <- "Manawatu/Rangitikei/Whanganui"
-
-ad_pre <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Pre AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_pre %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- ad_pre %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_pre %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- rbind(ad_pre_w, row) %>% 
-  mutate(
-    #Assessment = "Pre assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_pre_w_man <- ad_pre_w
-
-ad_mid <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Mid AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_mid %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- ad_mid %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_mid %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- rbind(ad_mid_w, row) %>% 
-  mutate(
-    #Assessment = "Mid assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_mid_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_mid_w_man <- ad_mid_w
-
-ad_fin <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Final AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_fin %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- ad_fin %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_fin %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- rbind(ad_fin_w, row) %>% 
-  mutate(
-    #Assessment = "Mid assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_fin_w_man <- ad_fin_w
-
-#########################################################
-#4. Nelson/Marlborough/West Coast
-region <- "Nelson/Marlborough/West Coast"
-
-ad_pre <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Pre AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_pre %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- ad_pre %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_pre %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Pre AB score` = median(`Pre AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Pre AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Pre AB score`, na.rm = TRUE))
-
-ad_pre_w <- rbind(ad_pre_w, row) %>% 
-  mutate(
-    #Assessment = "Pre assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_pre_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_pre_w_nel <- ad_pre_w
-
-ad_mid <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Mid AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_mid %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- ad_mid %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_mid %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Mid AB score` = median(`Mid AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Mid AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Mid AB score`, na.rm = TRUE))
-
-ad_mid_w <- rbind(ad_mid_w, row) %>% 
-  mutate(
-    #Assessment = "Mid assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_mid_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_mid_w_nel <- ad_mid_w
-
-ad_fin <- DATA %>% 
-  dplyr::select(Region, Gender, `Year level`, `Ethnicity 1`, `Final AB score`) %>%
-  filter(Region==region) %>%
-  dplyr::select(-Region) %>%
-  dplyr::rename(Ethnicity = `Ethnicity 1`) %>%
-  mutate(Ethnicity = as.factor(case_when(grepl("Maori|Māori", Ethnicity) ~ "Māori",
-                                         grepl("Pakeha|Pākehā|NZ European", Ethnicity) ~ "NZ European",
-                                         grepl("Pacific|Pascifica|Pasifika", Ethnicity) ~ "Pasifika",
-                                         is.na(Ethnicity) ~ "Unknown",
-                                         .default = "Other"))) %>%
-  mutate(Ethnicity = factor(Ethnicity, levels = c("Māori", "Pasifika", "NZ European", "Other", "Unknown"))) %>%
-  mutate(`Year level` = ifelse(is.na(`Year level`), "Unknown", `Year level`)) %>%
-  mutate(`Year level` = factor(`Year level`, levels = c(11:1, "Unknown"))) %>%
-  mutate(Gender = ifelse(is.na(Gender), "Unknown", Gender)) %>%
-  mutate(Gender = factor(Gender, levels = c("F", "M", "Unknown"))) %>%
-  mutate(across(contains("score"), as.numeric))
-
-# Overall column and row
-col <- ad_fin %>%
-  group_by(`Year level`, .drop = F) %>%
-  dplyr::summarise(Overall = median(`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- ad_fin %>%
-  group_by(`Year level`, Ethnicity, Gender, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  bind_cols(col[2])
-
-row <- ad_fin %>%
-  group_by(Gender, Ethnicity, .drop = F) %>%
-  dplyr::summarise(`Final AB score` = median(`Final AB score`, na.rm = TRUE)) %>%
-  pivot_wider(names_from = c(`Ethnicity`, Gender), values_from = c(`Final AB score`)) %>%
-  ungroup() %>%
-  mutate(`Year level` = "Overall") %>%
-  relocate(`Year level`) %>%
-  mutate(Overall = median(DATA[DATA$Region == region, ]$`Final AB score`, na.rm = TRUE))
-
-ad_fin_w <- rbind(ad_fin_w, row) %>% 
-  mutate(
-    #Assessment = "Final assessment", 
-    Region = region) %>%
-  relocate(Region)
-
-colnames(ad_fin_w) <- c("Region", "Year level", "Māori F", "Māori M", "Māori U", "Pasifika F", "Pasifika M", "Pasifika U", 
-                        "NZ European F", "NZ European M", "NZ European U", "Other F", "Other M", "Other U", "Unknown F", "Unknown M", "Unknown U", "Overall")
-ad_fin_w_nel <- ad_fin_w
-
-##############################################
-
-# Add a worksheet to the workbook
+# Add adaptive Bryant worksheet to the workbook
 addWorksheet(wb, sheetName = "Adaptive Bryant")
 
 # Create header dataframes, one for pre, mid, and final assessments
@@ -1773,46 +1518,93 @@ header_fin <- data.frame("FINAL ASSESSMENTS" = double(), "(Median score)" = doub
 # Write each dataframe to the worksheet with spacing
 writeData(wb, sheet = "Adaptive Bryant", x = header_pre, startRow = 1, startCol = 1)
 writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_all, startRow = 3, startCol = 1)
-writeData(wb, sheet = "Adaptive Bryant", x = header_mid, startRow = 1, startCol = ncol(ad_pre_w) + 3)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_all, startRow = 3, startCol = ncol(ad_pre_w) + 3)
-writeData(wb, sheet = "Adaptive Bryant", x = header_fin, startRow = 1, startCol = ncol(ad_pre_w) + ncol(ad_mid_w) + 6)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_all, startRow = 3, startCol = ncol(ad_pre_w) + ncol(ad_mid_w) + 6)
+writeData(wb, sheet = "Adaptive Bryant", x = header_mid, startRow = 1, startCol = ncol(ad_pre_w_all) + 3)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_all, startRow = 3, startCol = ncol(ad_pre_w_all) + 3)
+writeData(wb, sheet = "Adaptive Bryant", x = header_fin, startRow = 1, startCol = ncol(ad_pre_w_all) + ncol(ad_mid_w_all) + 6)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_all, startRow = 3, startCol = ncol(ad_pre_w_all) + ncol(ad_mid_w_all) + 6)
 
-writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_can, startRow = nrow(ad_pre_w) + 5, startCol = 1)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_can, startRow = nrow(ad_mid_w) + 5, startCol = ncol(ad_pre_w) + 3)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_can, startRow = nrow(ad_fin_w) + 5, startCol = ncol(ad_pre_w) + ncol(ad_mid_w) + 6)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_can, startRow = nrow(ad_pre_w_all) + 5, startCol = 1)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_can, startRow = nrow(ad_mid_w_all) + 5, startCol = ncol(ad_pre_w_all) + 3)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_can, startRow = nrow(ad_fin_w_all) + 5, startCol = ncol(ad_pre_w_all) + ncol(ad_mid_w_all) + 6)
 
-writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_HB, startRow = nrow(ad_pre_w) + nrow(ad_pre_w_can) + 7, startCol = 1)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_HB, startRow = nrow(ad_mid_w) + nrow(ad_pre_w_can) + 7, startCol = ncol(ad_pre_w) + 3)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_HB, startRow = nrow(ad_fin_w) + nrow(ad_pre_w_can) + 7, startCol = ncol(ad_pre_w) + ncol(ad_mid_w) + 6)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_HB, startRow = nrow(ad_pre_w_all) + nrow(ad_pre_w_can) + 7, startCol = 1)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_HB, startRow = nrow(ad_mid_w_all) + nrow(ad_pre_w_can) + 7, startCol = ncol(ad_pre_w_all) + 3)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_HB, startRow = nrow(ad_fin_w_all) + nrow(ad_pre_w_can) + 7, startCol = ncol(ad_pre_w_all) + ncol(ad_mid_w_all) + 6)
 
-writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_man, startRow = nrow(ad_pre_w) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + 9, startCol = 1)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_man, startRow = nrow(ad_mid_w) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + 9, startCol = ncol(ad_pre_w) + 3)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_man, startRow = nrow(ad_fin_w) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + 9, startCol = ncol(ad_pre_w) + ncol(ad_mid_w) + 6)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_man, startRow = nrow(ad_pre_w_all) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + 9, startCol = 1)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_man, startRow = nrow(ad_mid_w_all) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + 9, startCol = ncol(ad_pre_w_all) + 3)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_man, startRow = nrow(ad_fin_w_all) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + 9, startCol = ncol(ad_pre_w_all) + ncol(ad_mid_w_all) + 6)
 
-writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_nel, startRow = nrow(ad_pre_w) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + nrow(ad_pre_w_man) + 11, startCol = 1)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_nel, startRow = nrow(ad_mid_w) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + nrow(ad_pre_w_man) + 11, startCol = ncol(ad_pre_w) + 3)
-writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_nel, startRow = nrow(ad_fin_w) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + nrow(ad_pre_w_man) + 11, startCol = ncol(ad_pre_w) + ncol(ad_mid_w) + 6)
-
-##################################################################################################################
-##################################################################################################################
+writeData(wb, sheet = "Adaptive Bryant", x = ad_pre_w_nel, startRow = nrow(ad_pre_w_all) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + nrow(ad_pre_w_man) + 11, startCol = 1)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_mid_w_nel, startRow = nrow(ad_mid_w_all) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + nrow(ad_pre_w_man) + 11, startCol = ncol(ad_pre_w_all) + 3)
+writeData(wb, sheet = "Adaptive Bryant", x = ad_fin_w_nel, startRow = nrow(ad_fin_w_all) + nrow(ad_pre_w_can) + nrow(ad_pre_w_HB) + nrow(ad_pre_w_man) + 11, startCol = ncol(ad_pre_w_all) + ncol(ad_mid_w_all) + 6)
 
 
-# CREATE WORKBOOK
+# Add e-asTTle worksheet to the workbook
+addWorksheet(wb, sheetName = "e-asTTle data")
+
+# Write each dataframe to the worksheet with spacing
+writeData(wb, sheet = "e-asTTle data", x = easttle_all, startRow = 1, startCol = 1)
+writeData(wb, sheet = "e-asTTle data", x = easttle_can, startRow = nrow(easttle_all) + 4, startCol = 1)
+writeData(wb, sheet = "e-asTTle data", x = easttle_HB, startRow = nrow(easttle_all) + nrow(easttle_can) + 6, startCol = 1)
+writeData(wb, sheet = "e-asTTle data", x = easttle_man, startRow = nrow(easttle_all) + nrow(easttle_can) + nrow(easttle_HB) + 9, startCol = 1)
+writeData(wb, sheet = "e-asTTle data", x = easttle_nel, startRow = nrow(easttle_all) + nrow(easttle_can) + nrow(easttle_HB) + nrow(easttle_man) + 12, startCol = 1)
+
+
+
 
 # Add DATA and full sheets
+# # Anomymise DATA$Firsname and DATA$Surname by replacing each unique firstname with a unique random string and each unique surname with a unique random string
+# # Step 1: Create a mapping of unique first names to anonymized codes
+# first_name_mapping <- DATA %>%
+#   distinct(Firstname) %>%
+#   mutate(AnonFirstName = stri_rand_strings(n(), length = 8, pattern = "[A-Za-z0-9]"))
+# 
+# # Step 2: Create a mapping of unique surnames to anonymized codes
+# surname_mapping <- DATA %>%
+#   distinct(Surname) %>%
+#   mutate(AnonSurname = stri_rand_strings(n(), length = 8, pattern = "[A-Za-z0-9]"))
+# 
+# # Step 3: Replace the first names and surnames with their anonymized codes
+# DATA_anonymised <- DATA %>%
+#   left_join(first_name_mapping, by = "Firstname") %>%
+#   left_join(surname_mapping, by = "Surname") %>%
+#   mutate(Firstname = AnonFirstName, Surname = AnonSurname) %>%
+#   select(-AnonFirstName, -AnonSurname)  # Drop temporary columns
+
 addWorksheet(wb, sheetName = "DATA")
 writeData(wb, sheet = "DATA", x = DATA, startRow = 1, startCol = 1)
+
+
+# # Anomymise combined_data$Firstname and combined_data$Surname by replacing each unique firstname with a unique random string and each unique surname with a unique random string
+# # Step 1: Create a mapping of unique first names to anonymized codes
+# first_name_mapping <- combined_data %>%
+#   distinct(Firstname) %>%
+#   mutate(AnonFirstName = stri_rand_strings(n(), length = 8, pattern = "[A-Za-z0-9]"))
+# 
+# # Step 2: Create a mapping of unique surnames to anonymized codes
+# surname_mapping <- combined_data %>%
+#   distinct(Surname) %>%
+#   mutate(AnonSurname = stri_rand_strings(n(), length = 8, pattern = "[A-Za-z0-9]"))
+# 
+# # Step 3: Replace the first names and surnames with their anonymized codes
+# combined_data_anonymised <- combined_data %>%
+#   left_join(first_name_mapping, by = "Firstname") %>%
+#   left_join(surname_mapping, by = "Surname") %>%
+#   mutate(Firstname = AnonFirstName, Surname = AnonSurname) %>%
+#   select(-AnonFirstName, -AnonSurname, -student_details_Student_Name, -student_details_NA)  
+
 
 addWorksheet(wb, sheetName = "Raw data")
 writeData(wb, sheet = "Raw data", x = combined_data, startRow = 1, startCol = 1)
 
 # Add a notes sheet
-notes <- data.frame("NOTES" = c("Gender is expressed as F (female), M (male) and U (unknown - gender was not entered).",
+notes <- data.frame("NOTES" = c("Gender is expressed as F (female), M (male) and U (unknown - gender was not entered). One student has a gender of 'M (F)', which was changed to M.",
                                 "Year level contains all years entered by the teachers (i.e., some may be out of scope). Students with no year are set as 'unknown'.",
                                 "A value of 'NaN' appears in some percentages because there were no students in that category (0 divided by 0 produces an error).",
                                 "For the Ethnicity sheet, percentages are calculated row-wise, except for the total column. Only the first ethnicity value was used.",
-                                "Where there were two students with the same first name and teacher, but one student was missing the surname, the student missing the surname was assumed to be the same as the student with the surname."))
+                                "Where there were two students with the same first name and teacher, but one student was missing the surname, the student missing the surname was assumed to be the same as the student with the surname.",
+                                "Median values are presented for adaptive Bryant and e-asTTle scores."))
 
 addWorksheet(wb, sheetName = "Notes")
 writeData(wb, sheet = "Notes", x = notes, startRow = 1, startCol = 1)
@@ -1842,8 +1634,11 @@ for (sheet in sheets) {
   
 }
 
+
 # Save the workbook to a file
-saveWorkbook(wb, file = "Learning_Matters_summary_table.xlsx", overwrite = TRUE)
+saveWorkbook(wb, file = "report.xlsx", overwrite = TRUE)
+
+length(unique(DATA$Teacher))
 
 ##################################################################################################################
 ##################################################################################################################
