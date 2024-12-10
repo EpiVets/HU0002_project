@@ -1,13 +1,7 @@
-Welcome! 
+This project is for the regular reports Learning Matters must provide to the Ministry of Education.
 
-This is a minimal example of a book based on R Markdown and **bookdown** (https://github.com/rstudio/bookdown). 
+data_importation.R is for selecting, downloading and processing files on Google Drive and saving them as .xlsx files in the "Downloaded_xlsx_files" folder.
 
-This template provides a skeleton file structure that you can edit to create your book. 
+standard_report.R is for the usual recurring report. It takes the imported data in "Downloaded_xlsx_files", created by data_importation.R, and produces an xlsx report.
 
-The contents inside the .Rmd files provide some pointers to help you get started, but feel free to also delete the content in each file and start fresh.
-
-Additional resources:
-
-The **bookdown** book: https://bookdown.org/yihui/bookdown/
-
-The **bookdown** package reference site: https://pkgs.rstudio.com/bookdown
+easTTle_beg_end_report.R is for when beginning and ending e-asTTle data need to be provided and therefore has a different format to the usual report.
